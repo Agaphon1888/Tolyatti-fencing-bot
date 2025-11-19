@@ -5,7 +5,11 @@ load_dotenv()
 
 # Конфигурация бота
 BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
-ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID', '')
+
+# Список администраторов (chat_id через запятую)
+ADMINS_STR = os.getenv('ADMINS', '')
+ADMINS = [int(admin_id.strip()) for admin_id in ADMINS_STR.split(',') if admin_id.strip()]
+
 PORT = int(os.getenv('PORT', 5000))
 
 # Данные организации
@@ -124,3 +128,7 @@ FAQ_TEXT = '''
 <b>5. Можно ли поменять район/базу?</b>
 Да, в течение пробного периода можно выбрать наиболее удобный вариант.
 '''
+
+def is_admin(user_id):
+    """Проверяет, является ли пользователь администратором"""
+    return user_id in ADMINS
