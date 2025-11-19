@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: fencing-telegram-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMINS
+        sync: false
