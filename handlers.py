@@ -1,38 +1,46 @@
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+from telegram.ext import (
+    CallbackContext, 
+    CommandHandler, 
+    MessageHandler, 
+    Filters, 
+    CallbackQueryHandler,
+    Updater
+)
 from config import DISTRICTS_INFO, ORG_INFO, DOCUMENTS_LIST, FAQ_TEXT, is_admin, ADMINS
 from database import save_user_session, log_user_action, init_db, get_statistics, get_user_info, log_admin_action, broadcast_message
 
 logger = logging.getLogger(__name__)
 
-def setup_handlers(application):
-    """Настройка всех обработчиков"""
+def setup_handlers(updater: Updater):
+    """Настройка всех обработчиков для версии 13.x"""
+    dp = updater.dispatcher
     
     # Команды
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("payment", payment_command))
-    application.add_handler(CommandHandler("documents", documents_command))
-    application.add_handler(CommandHandler("faq", faq_command))
-    application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(CommandHandler("admin", admin_command))
-    application.add_handler(CommandHandler("broadcast", broadcast_command))
+    dp.add_handler(CommandHandler("start", start_command))
+    dp.add_handler(CommandHandler("help", help_command))
+    dp.add_handler(CommandHandler("payment", payment_command))
+    dp.add_handler(CommandHandler("documents", documents_command))
+    dp.add_handler(CommandHandler("faq", faq_command))
+    dp.add_handler(CommandHandler("stats", stats_command))
+    dp.add_handler(CommandHandler("admin", admin_command))
+    dp.add_handler(CommandHandler("broadcast", broadcast_command))
     
     # Callback запросы
-    application.add_handler(CallbackQueryHandler(handle_district_selection, pattern='^district_'))
-    application.add_handler(CallbackQueryHandler(handle_base_selection, pattern='^base_'))
-    application.add_handler(CallbackQueryHandler(handle_main_menu, pattern='^main_'))
-    application.add_handler(CallbackQueryHandler(handle_back, pattern='^back_'))
-    application.add_handler(CallbackQueryHandler(handle_admin_actions, pattern='^admin_'))
+    dp.add_handler(CallbackQueryHandler(handle_district_selection, pattern='^district_'))
+    dp.add_handler(CallbackQueryHandler(handle_base_selection, pattern='^base_'))
+    dp.add_handler(CallbackQueryHandler(handle_main_menu, pattern='^main_'))
+    dp.add_handler(CallbackQueryHandler(handle_back, pattern='^back_'))
+    dp.add_handler(CallbackQueryHandler(handle_admin_actions, pattern='^admin_'))
     
     # Обработчики текстовых сообщений (для рассылки)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
     
     # Инициализация БД
     init_db()
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def start_command(update: Update, context: CallbackContext):
     """Обработчик команды /start"""
     user = update.effective_user
     save_user_session(user.id, user.username, user.first_name, user.last_name)
@@ -40,7 +48,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Проверяем, является ли пользователь администратором
     if is_admin(user.id):
-        await show_admin_menu(update, context)
+        show_admin_menu(update, context)
         return
     
     keyboard = [
@@ -64,19 +72,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Выберите нужный раздел:
     """
     
-    await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='HTML')
+    update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='HTML')
 
-async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def admin_command(update: Update, context: CallbackContext):
     """Обработчик команды /admin"""
     user = update.effective_user
     
     if not is_admin(user.id):
-        await update.message.reply_text("⛔ У вас нет прав доступа к админ-панели.")
+        update.message.reply_text("⛔ У вас нет прав доступа к админ-панели.")
         return
     
-    await show_admin_menu(update, context)
+    show_admin_menu(update, context)
 
-async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def show_admin_menu(update: Update, context: CallbackContext):
     """Показать меню администратора"""
     keyboard = [
         [InlineKeyboardButton("📊 Статистика", callback_data='admin_stats')],
@@ -95,16 +103,16 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     
     if update.callback_query:
-        await update.callback_query.edit_message_text(admin_text, reply_markup=reply_markup, parse_mode='HTML')
+        update.callback_query.edit_message_text(admin_text, reply_markup=reply_markup, parse_mode='HTML')
     else:
-        await update.message.reply_text(admin_text, reply_markup=reply_markup, parse_mode='HTML')
+        update.message.reply_text(admin_text, reply_markup=reply_markup, parse_mode='HTML')
 
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def stats_command(update: Update, context: CallbackContext):
     """Обработчик команды /stats"""
     user = update.effective_user
     
     if not is_admin(user.id):
-        await update.message.reply_text("⛔ У вас нет прав доступа к этой команде.")
+        update.message.reply_text("⛔ У вас нет прав доступа к этой команде.")
         return
     
     stats = get_statistics()
@@ -129,14 +137,14 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("◀️ Назад в админку", callback_data='admin_back')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(stats_text, reply_markup=reply_markup, parse_mode='HTML')
+    update.message.reply_text(stats_text, reply_markup=reply_markup, parse_mode='HTML')
 
-async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def broadcast_command(update: Update, context: CallbackContext):
     """Обработчик команды /broadcast"""
     user = update.effective_user
     
     if not is_admin(user.id):
-        await update.message.reply_text("⛔ У вас нет прав доступа к этой команде.")
+        update.message.reply_text("⛔ У вас нет прав доступа к этой команде.")
         return
     
     if not context.args:
@@ -148,7 +156,7 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(
+        update.message.reply_text(
             "📢 <b>Рассылка сообщений</b>\n\n"
             "Выберите тип рассылки:",
             reply_markup=reply_markup,
@@ -158,33 +166,33 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Если текст передан сразу с командой
     message_text = ' '.join(context.args)
-    await execute_broadcast(update, context, message_text, 'all')
+    execute_broadcast(update, context, message_text, 'all')
 
-async def handle_admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_admin_actions(update: Update, context: CallbackContext):
     """Обработчик действий администратора"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     user = query.from_user
     
     if not is_admin(user.id):
-        await query.edit_message_text("⛔ У вас нет прав доступа.")
+        query.edit_message_text("⛔ У вас нет прав доступа.")
         return
     
     action = query.data.replace('admin_', '')
     
     if action == 'stats':
-        await show_stats_menu(query)
+        show_stats_menu(query)
     elif action == 'broadcast':
-        await show_broadcast_menu(query)
+        show_broadcast_menu(query)
     elif action == 'search':
-        await show_search_menu(query)
+        show_search_menu(query)
     elif action == 'back':
-        await show_admin_menu_from_callback(query)
+        show_admin_menu_from_callback(query)
     elif action == 'broadcast_all':
         context.user_data['broadcast_type'] = 'all'
         context.user_data['awaiting_broadcast'] = True
-        await query.edit_message_text(
+        query.edit_message_text(
             "📢 <b>Рассылка всем пользователям</b>\n\n"
             "Введите сообщение для рассылки:",
             parse_mode='HTML'
@@ -192,13 +200,13 @@ async def handle_admin_actions(update: Update, context: ContextTypes.DEFAULT_TYP
     elif action == 'broadcast_users':
         context.user_data['broadcast_type'] = 'users'
         context.user_data['awaiting_broadcast'] = True
-        await query.edit_message_text(
+        query.edit_message_text(
             "📢 <b>Рассылка только пользователям</b>\n\n"
             "Введите сообщение для рассылки:",
             parse_mode='HTML'
         )
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_message(update: Update, context: CallbackContext):
     """Обработчик текстовых сообщений"""
     user = update.effective_user
     message_text = update.message.text
@@ -206,18 +214,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверяем, ожидается ли сообщение для рассылки
     if is_admin(user.id) and context.user_data.get('awaiting_broadcast'):
         broadcast_type = context.user_data.get('broadcast_type', 'all')
-        await execute_broadcast(update, context, message_text, broadcast_type)
+        execute_broadcast(update, context, message_text, broadcast_type)
         context.user_data['awaiting_broadcast'] = False
         return
     
     # Обычная обработка сообщений
     log_user_action(user.id, 'message')
-    await update.message.reply_text(
+    update.message.reply_text(
         "Используйте команды или кнопки меню для навигации. "
         "Если вы заблудились, введите /start"
     )
 
-async def execute_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE, message_text, broadcast_type):
+def execute_broadcast(update: Update, context: CallbackContext, message_text, broadcast_type):
     """Выполняет рассылку сообщения"""
     user = update.effective_user
     
@@ -234,7 +242,7 @@ async def execute_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     failed = 0
     
     # Отправляем сообщение о начале рассылки
-    status_message = await update.message.reply_text(
+    status_message = update.message.reply_text(
         f"📢 <b>Начинаю рассылку</b>\n\n"
         f"Целевая аудитория: {target}\n"
         f"Количество пользователей: {total_users}\n"
@@ -245,7 +253,7 @@ async def execute_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     # Выполняем рассылку
     for i, user_id in enumerate(users):
         try:
-            await context.bot.send_message(
+            context.bot.send_message(
                 chat_id=user_id,
                 text=f"📢 <b>Сообщение от администрации:</b>\n\n{message_text}",
                 parse_mode='HTML'
@@ -257,15 +265,20 @@ async def execute_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         
         # Обновляем статус каждые 10 отправок
         if i % 10 == 0 or i == total_users - 1:
-            await status_message.edit_text(
-                f"📢 <b>Рассылка в процессе</b>\n\n"
-                f"Целевая аудитория: {target}\n"
-                f"Количество пользователей: {total_users}\n"
-                f"Статус: {i+1}/{total_users}\n"
-                f"✅ Успешно: {successful}\n"
-                f"❌ Ошибок: {failed}",
-                parse_mode='HTML'
-            )
+            try:
+                context.bot.edit_message_text(
+                    chat_id=status_message.chat_id,
+                    message_id=status_message.message_id,
+                    text=f"📢 <b>Рассылка в процессе</b>\n\n"
+                         f"Целевая аудитория: {target}\n"
+                         f"Количество пользователей: {total_users}\n"
+                         f"Статус: {i+1}/{total_users}\n"
+                         f"✅ Успешно: {successful}\n"
+                         f"❌ Ошибок: {failed}",
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.error(f"Ошибка обновления статуса: {e}")
     
     # Логируем действие администратора
     log_admin_action(
@@ -275,16 +288,21 @@ async def execute_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     )
     
     # Финальное сообщение
-    await status_message.edit_text(
-        f"✅ <b>Рассылка завершена</b>\n\n"
-        f"Целевая аудитория: {target}\n"
-        f"Всего пользователей: {total_users}\n"
-        f"✅ Успешно отправлено: {successful}\n"
-        f"❌ Ошибок отправки: {failed}",
-        parse_mode='HTML'
-    )
+    try:
+        context.bot.edit_message_text(
+            chat_id=status_message.chat_id,
+            message_id=status_message.message_id,
+            text=f"✅ <b>Рассылка завершена</b>\n\n"
+                 f"Целевая аудитория: {target}\n"
+                 f"Всего пользователей: {total_users}\n"
+                 f"✅ Успешно отправлено: {successful}\n"
+                 f"❌ Ошибок отправки: {failed}",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.error(f"Ошибка финального обновления статуса: {e}")
 
-async def show_stats_menu(query):
+def show_stats_menu(query):
     """Показать меню статистики"""
     stats = get_statistics()
     
@@ -304,9 +322,9 @@ async def show_stats_menu(query):
     keyboard = [[InlineKeyboardButton("◀️ Назад в админку", callback_data='admin_back')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(stats_text, reply_markup=reply_markup, parse_mode='HTML')
+    query.edit_message_text(stats_text, reply_markup=reply_markup, parse_mode='HTML')
 
-async def show_broadcast_menu(query):
+def show_broadcast_menu(query):
     """Показать меню рассылки"""
     keyboard = [
         [InlineKeyboardButton("📢 Всем пользователям", callback_data='admin_broadcast_all')],
@@ -315,16 +333,16 @@ async def show_broadcast_menu(query):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
+    query.edit_message_text(
         "📢 <b>Рассылка сообщений</b>\n\n"
         "Выберите тип рассылки:",
         reply_markup=reply_markup,
         parse_mode='HTML'
     )
 
-async def show_search_menu(query):
+def show_search_menu(query):
     """Показать меню поиска пользователя"""
-    await query.edit_message_text(
+    query.edit_message_text(
         "👥 <b>Поиск пользователя</b>\n\n"
         "Для поиска пользователя используйте команду:\n"
         "<code>/user USER_ID</code>\n\n"
@@ -332,7 +350,7 @@ async def show_search_menu(query):
         parse_mode='HTML'
     )
 
-async def show_admin_menu_from_callback(query):
+def show_admin_menu_from_callback(query):
     """Показать меню администратора из callback"""
     keyboard = [
         [InlineKeyboardButton("📊 Статистика", callback_data='admin_stats')],
@@ -350,10 +368,10 @@ async def show_admin_menu_from_callback(query):
 Выберите действие:
     """
     
-    await query.edit_message_text(admin_text, reply_markup=reply_markup, parse_mode='HTML')
+    query.edit_message_text(admin_text, reply_markup=reply_markup, parse_mode='HTML')
 
 # Команды для обычных пользователей
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def help_command(update: Update, context: CallbackContext):
     """Обработчик команды /help"""
     user = update.effective_user
     
@@ -380,82 +398,82 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     help_text += "\nИли просто используйте кнопки меню!"
     
-    await update.message.reply_text(help_text, parse_mode='HTML')
+    update.message.reply_text(help_text, parse_mode='HTML')
 
-async def payment_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def payment_command(update: Update, context: CallbackContext):
     """Обработчик команды /payment"""
-    await send_payment_info(update, context)
+    send_payment_info(update, context)
 
-async def documents_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def documents_command(update: Update, context: CallbackContext):
     """Обработчик команды /documents"""
-    await send_documents_info(update, context)
+    send_documents_info(update, context)
 
-async def faq_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def faq_command(update: Update, context: CallbackContext):
     """Обработчик команды /faq"""
-    await send_faq_info(update, context)
+    send_faq_info(update, context)
 
-async def send_payment_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def send_payment_info(update: Update, context: CallbackContext):
     """Отправить информацию об оплате (команда)"""
     message = format_payment_info()
     keyboard = [[InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_main')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(message, reply_markup=reply_markup, parse_mode='HTML')
+    update.message.reply_text(message, reply_markup=reply_markup, parse_mode='HTML')
 
-async def send_payment_info_callback(query):
+def send_payment_info_callback(query):
     """Отправить информацию об оплате (callback)"""
     message = format_payment_info()
     keyboard = [[InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_main')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
+    query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
 
-async def send_documents_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def send_documents_info(update: Update, context: CallbackContext):
     """Отправить список документов (команда)"""
     keyboard = [[InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_main')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(DOCUMENTS_LIST, reply_markup=reply_markup, parse_mode='HTML')
+    update.message.reply_text(DOCUMENTS_LIST, reply_markup=reply_markup, parse_mode='HTML')
 
-async def send_documents_info_callback(query):
+def send_documents_info_callback(query):
     """Отправить список документов (callback)"""
     keyboard = [[InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_main')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(DOCUMENTS_LIST, reply_markup=reply_markup, parse_mode='HTML')
+    query.edit_message_text(DOCUMENTS_LIST, reply_markup=reply_markup, parse_mode='HTML')
 
-async def send_faq_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def send_faq_info(update: Update, context: CallbackContext):
     """Отправить FAQ (команда)"""
     keyboard = [[InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_main')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(FAQ_TEXT, reply_markup=reply_markup, parse_mode='HTML')
+    update.message.reply_text(FAQ_TEXT, reply_markup=reply_markup, parse_mode='HTML')
 
-async def send_faq_info_callback(query):
+def send_faq_info_callback(query):
     """Отправить FAQ (callback)"""
     keyboard = [[InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_main')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(FAQ_TEXT, reply_markup=reply_markup, parse_mode='HTML')
+    query.edit_message_text(FAQ_TEXT, reply_markup=reply_markup, parse_mode='HTML')
 
 # Обработчики основного меню
-async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_main_menu(update: Update, context: CallbackContext):
     """Обработчик главного меню"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     action = query.data.replace('main_', '')
     
     if action == 'districts':
-        await show_districts_menu(query)
+        show_districts_menu(query)
     elif action == 'payment':
-        await send_payment_info_callback(query)
+        send_payment_info_callback(query)
     elif action == 'documents':
-        await send_documents_info_callback(query)
+        send_documents_info_callback(query)
     elif action == 'faq':
-        await send_faq_info_callback(query)
+        send_faq_info_callback(query)
 
-async def show_districts_menu(query):
+def show_districts_menu(query):
     """Показать меню выбора района"""
     keyboard = [
         [InlineKeyboardButton("Центральный район", callback_data='district_central')],
@@ -467,7 +485,7 @@ async def show_districts_menu(query):
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
+    query.edit_message_text(
         "🏃 <b>Выберите район:</b>\n\n"
         "После выбора района вы получите:\n"
         "• Адрес и расписание\n"
@@ -477,21 +495,21 @@ async def show_districts_menu(query):
         parse_mode='HTML'
     )
 
-async def handle_district_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_district_selection(update: Update, context: CallbackContext):
     """Обработчик выбора района"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     district_key = query.data.replace('district_', '')
     district_info = DISTRICTS_INFO.get(district_key)
     
     if not district_info:
-        await query.edit_message_text("Район не найден")
+        query.edit_message_text("Район не найден")
         return
     
     # Для Автозаводского района показываем выбор базы
     if district_key == 'avtozavodsky':
-        await show_bases_menu(query, district_info)
+        show_bases_menu(query, district_info)
         return
     
     # Для других районов показываем информацию сразу
@@ -504,9 +522,9 @@ async def handle_district_selection(update: Update, context: ContextTypes.DEFAUL
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
+    query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
 
-async def show_bases_menu(query, district_info):
+def show_bases_menu(query, district_info):
     """Показать меню выбора базы для Автозаводского района"""
     keyboard = []
     
@@ -517,24 +535,24 @@ async def show_bases_menu(query, district_info):
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
+    query.edit_message_text(
         "🏢 <b>Автозаводский район</b>\n\n"
         "Выберите удобную вам базу:",
         reply_markup=reply_markup,
         parse_mode='HTML'
     )
 
-async def handle_base_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_base_selection(update: Update, context: CallbackContext):
     """Обработчик выбора базы"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     base_key = query.data.replace('base_', '')
     district_info = DISTRICTS_INFO['avtozavodsky']
     base_info = district_info['bases'].get(base_key)
     
     if not base_info:
-        await query.edit_message_text("База не найдена")
+        query.edit_message_text("База не найдена")
         return
     
     message = format_base_info(district_info, base_info)
@@ -546,19 +564,19 @@ async def handle_base_selection(update: Update, context: ContextTypes.DEFAULT_TY
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
+    query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
 
-async def handle_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_back(update: Update, context: CallbackContext):
     """Обработчик кнопки Назад"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     action = query.data.replace('back_', '')
     
     if action == 'to_main':
-        await start_command_callback(query)
+        start_command_callback(query)
 
-async def start_command_callback(query):
+def start_command_callback(query):
     """Главное меню для callback"""
     user = query.from_user
     
@@ -582,12 +600,12 @@ async def start_command_callback(query):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     welcome_text = f"""
-🤺 Добро пожаловать в <b>Тольяттинскую федерацию фехтования</b>!
+🤺 Добро пожаловать в <b>Тольяттинскую федерации фехтования</b>!
 
 Выберите нужный раздел:
     """
     
-    await query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='HTML')
+    query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='HTML')
 
 # Вспомогательные функции форматирования
 def format_district_info(district_info):
