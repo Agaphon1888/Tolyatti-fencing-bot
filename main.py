@@ -2,7 +2,7 @@ import os
 import logging
 from flask import Flask, request
 from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 import threading
 import asyncio
 from handlers import setup_handlers
@@ -28,7 +28,6 @@ def health():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    # Для будущей интеграции с вебхуками
     return "OK"
 
 # Глобальная переменная для бота
