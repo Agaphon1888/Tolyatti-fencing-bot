@@ -1,15 +1,10 @@
 import os
 import logging
-from flask import Flask, request
+from flask import Flask
 import threading
-import asyncio
 from config import BOT_TOKEN, PORT
 
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -29,27 +24,23 @@ def webhook():
 def run_bot():
     """Запуск бота в отдельном потоке"""
     try:
-        logger.info("🚀 Starting Telegram bot...")
+        logger.info("🚀 Starting Telegram bot with pyTelegramBotAPI...")
         
-        # Импортируем внутри функции чтобы отложить импорт
-        from telegram.ext import Application
-        from handlers import setup_handlers
+        # Импортируем здесь, чтобы отложить импорт до запуска потока
+        import telebot
+        from bot_handlers import setup_bot_handlers
         
-        async def main():
-            """Основная асинхронная функция"""
-            # Создаем приложение
-            application = Application.builder().token(BOT_TOKEN).build()
-            
-            # Настраиваем обработчики
-            setup_handlers(application)
-            
-            logger.info("🔍 Starting polling...")
-            await application.run_polling()
+        # Создаем экземпляр бота
+        bot = telebot.TeleBot(BOT_TOKEN)
         
-        # Запускаем асинхронный цикл
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(main())
+        # Настраиваем обработчики
+        setup_bot_handlers(bot)
+        
+        logger.info("✅ Bot handlers setup completed")
+        logger.info("🔍 Starting polling...")
+        
+        # Запускаем polling
+        bot.infinity_polling(timeout=60, long_polling_timeout=60)
         
     except Exception as e:
         logger.error(f"❌ Bot failed to start: {e}")
