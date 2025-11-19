@@ -4,11 +4,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Конфигурация бота
-BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is required")
 
-# Список администраторов (chat_id через запятую)
+# Список администраторов
 ADMINS_STR = os.getenv('ADMINS', '')
-ADMINS = [int(admin_id.strip()) for admin_id in ADMINS_STR.split(',') if admin_id.strip()]
+ADMINS = []
+if ADMINS_STR:
+    ADMINS = [int(admin_id.strip()) for admin_id in ADMINS_STR.split(',') if admin_id.strip().isdigit()]
 
 PORT = int(os.getenv('PORT', 5000))
 
