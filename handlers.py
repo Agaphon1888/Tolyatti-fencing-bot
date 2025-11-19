@@ -1,6 +1,6 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, CallbackContext
 import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 from config import DISTRICTS_INFO, ORG_INFO, DOCUMENTS_LIST, FAQ_TEXT, is_admin, ADMINS
 from database import save_user_session, log_user_action, init_db, get_statistics, get_user_info, log_admin_action, broadcast_message
 
@@ -183,6 +183,7 @@ async def handle_admin_actions(update: Update, context: ContextTypes.DEFAULT_TYP
         await show_admin_menu_from_callback(query)
     elif action == 'broadcast_all':
         context.user_data['broadcast_type'] = 'all'
+        context.user_data['awaiting_broadcast'] = True
         await query.edit_message_text(
             "📢 <b>Рассылка всем пользователям</b>\n\n"
             "Введите сообщение для рассылки:",
@@ -190,6 +191,7 @@ async def handle_admin_actions(update: Update, context: ContextTypes.DEFAULT_TYP
         )
     elif action == 'broadcast_users':
         context.user_data['broadcast_type'] = 'users'
+        context.user_data['awaiting_broadcast'] = True
         await query.edit_message_text(
             "📢 <b>Рассылка только пользователям</b>\n\n"
             "Введите сообщение для рассылки:",
@@ -350,11 +352,7 @@ async def show_admin_menu_from_callback(query):
     
     await query.edit_message_text(admin_text, reply_markup=reply_markup, parse_mode='HTML')
 
-# ... остальные функции из предыдущей версии остаются без изменений ...
-# (start_command, help_command, payment_command, documents_command, faq_command,
-# handle_district_selection, handle_base_selection, handle_main_menu, handle_back,
-# format_district_info, format_base_info, format_payment_info)
-
+# Команды для обычных пользователей
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /help"""
     user = update.effective_user
@@ -384,7 +382,182 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(help_text, parse_mode='HTML')
 
-# Добавляем недостающие функции для совместимости
+async def payment_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /payment"""
+    await send_payment_info(update, context)
+
+async def documents_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /documents"""
+    await send_documents_info(update, context)
+
+async def faq_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /faq"""
+    await send_faq_info(update, context)
+
+async def send_payment_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправить информацию об оплате (команда)"""
+    message = format_payment_info()
+    keyboard = [[InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_main')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(message, reply_markup=reply_markup, parse_mode='HTML')
+
+async def send_payment_info_callback(query):
+    """Отправить информацию об оплате (callback)"""
+    message = format_payment_info()
+    keyboard = [[InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_main')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
+
+async def send_documents_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправить список документов (команда)"""
+    keyboard = [[InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_main')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(DOCUMENTS_LIST, reply_markup=reply_markup, parse_mode='HTML')
+
+async def send_documents_info_callback(query):
+    """Отправить список документов (callback)"""
+    keyboard = [[InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_main')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(DOCUMENTS_LIST, reply_markup=reply_markup, parse_mode='HTML')
+
+async def send_faq_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправить FAQ (команда)"""
+    keyboard = [[InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_main')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(FAQ_TEXT, reply_markup=reply_markup, parse_mode='HTML')
+
+async def send_faq_info_callback(query):
+    """Отправить FAQ (callback)"""
+    keyboard = [[InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_main')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(FAQ_TEXT, reply_markup=reply_markup, parse_mode='HTML')
+
+# Обработчики основного меню
+async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик главного меню"""
+    query = update.callback_query
+    await query.answer()
+    
+    action = query.data.replace('main_', '')
+    
+    if action == 'districts':
+        await show_districts_menu(query)
+    elif action == 'payment':
+        await send_payment_info_callback(query)
+    elif action == 'documents':
+        await send_documents_info_callback(query)
+    elif action == 'faq':
+        await send_faq_info_callback(query)
+
+async def show_districts_menu(query):
+    """Показать меню выбора района"""
+    keyboard = [
+        [InlineKeyboardButton("Центральный район", callback_data='district_central')],
+        [InlineKeyboardButton("Автозаводский район", callback_data='district_avtozavodsky')],
+        [InlineKeyboardButton("Комсомольский район", callback_data='district_komso')],
+        [InlineKeyboardButton("Жигулёвск", callback_data='district_zhig')],
+        [InlineKeyboardButton("◀️ Назад", callback_data='back_to_main')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "🏃 <b>Выберите район:</b>\n\n"
+        "После выбора района вы получите:\n"
+        "• Адрес и расписание\n"
+        "• Ссылку на чат родителей\n"
+        "• Всю необходимую информацию",
+        reply_markup=reply_markup,
+        parse_mode='HTML'
+    )
+
+async def handle_district_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик выбора района"""
+    query = update.callback_query
+    await query.answer()
+    
+    district_key = query.data.replace('district_', '')
+    district_info = DISTRICTS_INFO.get(district_key)
+    
+    if not district_info:
+        await query.edit_message_text("Район не найден")
+        return
+    
+    # Для Автозаводского района показываем выбор базы
+    if district_key == 'avtozavodsky':
+        await show_bases_menu(query, district_info)
+        return
+    
+    # Для других районов показываем информацию сразу
+    message = format_district_info(district_info)
+    keyboard = [
+        [InlineKeyboardButton("💳 Реквизиты оплаты", callback_data='main_payment')],
+        [InlineKeyboardButton("📋 Документы", callback_data='main_documents')],
+        [InlineKeyboardButton("◀️ Выбрать другой район", callback_data='main_districts')],
+        [InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_main')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
+
+async def show_bases_menu(query, district_info):
+    """Показать меню выбора базы для Автозаводского района"""
+    keyboard = []
+    
+    for base_key, base_info in district_info['bases'].items():
+        keyboard.append([InlineKeyboardButton(base_info['name'], callback_data=f'base_{base_key}')])
+    
+    keyboard.append([InlineKeyboardButton("◀️ Назад к районам", callback_data='main_districts')])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "🏢 <b>Автозаводский район</b>\n\n"
+        "Выберите удобную вам базу:",
+        reply_markup=reply_markup,
+        parse_mode='HTML'
+    )
+
+async def handle_base_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик выбора базы"""
+    query = update.callback_query
+    await query.answer()
+    
+    base_key = query.data.replace('base_', '')
+    district_info = DISTRICTS_INFO['avtozavodsky']
+    base_info = district_info['bases'].get(base_key)
+    
+    if not base_info:
+        await query.edit_message_text("База не найдена")
+        return
+    
+    message = format_base_info(district_info, base_info)
+    keyboard = [
+        [InlineKeyboardButton("💳 Реквизиты оплаты", callback_data='main_payment')],
+        [InlineKeyboardButton("📋 Документы", callback_data='main_documents')],
+        [InlineKeyboardButton("◀️ Выбрать другую базу", callback_data='district_avtozavodsky')],
+        [InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_main')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='HTML')
+
+async def handle_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик кнопки Назад"""
+    query = update.callback_query
+    await query.answer()
+    
+    action = query.data.replace('back_', '')
+    
+    if action == 'to_main':
+        await start_command_callback(query)
+
 async def start_command_callback(query):
     """Главное меню для callback"""
     user = query.from_user
@@ -415,3 +588,72 @@ async def start_command_callback(query):
     """
     
     await query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='HTML')
+
+# Вспомогательные функции форматирования
+def format_district_info(district_info):
+    """Форматирование информации о районе"""
+    return f"""
+<b>{district_info['name']}</b>
+
+📍 <b>Адрес:</b> {district_info['address']}
+
+📅 <b>Расписание:</b>
+{district_info['schedule']}
+
+💬 <b>Чат для родителей:</b> {district_info['chat_link']}
+
+💰 <b>Стоимость:</b> {district_info['price']}
+
+👕 <b>С собой на тренировку:</b> сменные кроссовки для зала, белые носки, спортивная форма, бутылочка с водой
+
+⚠️ <b>Важно:</b> пока не нужно платить и приносить документы! Все в процессе!
+    """
+
+def format_base_info(district_info, base_info):
+    """Форматирование информации о базе"""
+    return f"""
+<b>{district_info['name']} - {base_info['name']}</b>
+
+📍 <b>Адрес:</b> {base_info['address']}
+
+📅 <b>Расписание:</b>
+{base_info['schedule']}
+
+💬 <b>Чат для родителей:</b> {district_info['chat_link']}
+
+💰 <b>Стоимость:</b> {district_info['price']}
+
+👕 <b>С собой на тренировку:</b> сменные кроссовки для зала, белые носки, спортивная форма, бутылочка с водой
+
+⚠️ <b>Важно:</b> пока не нужно платить и приносить документы! Все в процессе!
+    """
+
+def format_payment_info():
+    """Форматирование информации об оплате"""
+    return f"""
+💳 <b>Реквизиты для оплаты</b>
+
+🏛 <b>Полное наименование:</b> 
+{ORG_INFO['full_name']}
+
+📋 <b>Сокращенное:</b> 
+{ORG_INFO['short_name']}
+
+📊 <b>Реквизиты:</b>
+ИНН: {ORG_INFO['inn']}
+КПП: {ORG_INFO['kpp']}
+ОГРН: {ORG_INFO['ogrn']}
+Расчетный счет: {ORG_INFO['account']}
+Банк: {ORG_INFO['bank']}
+БИК: {ORG_INFO['bik']}
+Корр. счет: {ORG_INFO['correspondent_account']}
+
+💸 <b>Сумма:</b> 2000 рублей в месяц
+📝 <b>Назначение платежа:</b> "Добровольное пожертвование от [ФИО ребенка]"
+
+⚠️ <b>Важно:</b>
+• Оплата производится после пробных тренировок
+• В назначении платежа укажите ФИО ребенка
+• Сохраните чек об оплате
+• Квитанцию можно показать тренеру или отправить в чат группы
+    """
