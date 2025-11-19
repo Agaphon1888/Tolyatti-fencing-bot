@@ -1,10 +1,15 @@
 import os
 import logging
-from flask import Flask
+from flask import Flask, request
 import threading
+import asyncio
 from config import BOT_TOKEN, PORT
 
-logging.basicConfig(level=logging.INFO)
+# Настройка логирования
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -25,20 +30,26 @@ def run_bot():
     """Запуск бота в отдельном потоке"""
     try:
         logger.info("🚀 Starting Telegram bot...")
-        from telegram.ext import Updater
+        
+        # Импортируем внутри функции чтобы отложить импорт
+        from telegram.ext import Application
         from handlers import setup_handlers
         
-        updater = Updater(token=BOT_TOKEN, use_context=True)
+        async def main():
+            """Основная асинхронная функция"""
+            # Создаем приложение
+            application = Application.builder().token(BOT_TOKEN).build()
+            
+            # Настраиваем обработчики
+            setup_handlers(application)
+            
+            logger.info("🔍 Starting polling...")
+            await application.run_polling()
         
-        # Настраиваем обработчики
-        setup_handlers(updater)
-        
-        # Запускаем polling
-        updater.start_polling()
-        logger.info("✅ Bot started successfully with polling!")
-        
-        # Блокируем поток
-        updater.idle()
+        # Запускаем асинхронный цикл
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(main())
         
     except Exception as e:
         logger.error(f"❌ Bot failed to start: {e}")
