@@ -2,14 +2,9 @@ import os
 import logging
 from flask import Flask
 import threading
-import asyncio
 from config import BOT_TOKEN, PORT
 
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -26,38 +21,29 @@ def health():
 def webhook():
     return "OK"
 
-async def run_bot_async():
-    """Асинхронный запуск бота"""
+def run_bot():
+    """Запуск бота в отдельном потоке"""
     try:
+        logger.info("🚀 Starting Telegram bot...")
         from telegram.ext import Updater
         from handlers import setup_handlers
         
-        logger.info("🤖 Creating bot application...")
-        
-        # Используем Updater для версии 13.x
         updater = Updater(token=BOT_TOKEN, use_context=True)
         
         # Настраиваем обработчики
         setup_handlers(updater)
         
-        logger.info("🔍 Starting polling...")
+        # Запускаем polling
         updater.start_polling()
         logger.info("✅ Bot started successfully with polling!")
         
-        # Бесконечный цикл для поддержания работы
-        while True:
-            await asyncio.sleep(3600)  # Спим 1 час
-            
+        # Блокируем поток
+        updater.idle()
+        
     except Exception as e:
-        logger.error(f"❌ Bot error: {e}")
+        logger.error(f"❌ Bot failed to start: {e}")
         import traceback
         logger.error(traceback.format_exc())
-
-def run_bot():
-    """Запуск бота в отдельном потоке"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(run_bot_async())
 
 # Запускаем бота только если токен установлен
 if BOT_TOKEN and BOT_TOKEN != 'YOUR_BOT_TOKEN_HERE':
