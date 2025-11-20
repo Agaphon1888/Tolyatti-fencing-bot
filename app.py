@@ -221,6 +221,17 @@ def get_back_to_main_keyboard():
         ]
     }
 
+def get_admin_menu_keyboard():
+    """Клавиатура админ-панели"""
+    return {
+        'inline_keyboard': [
+            [{'text': '📊 Статистика', 'callback_data': 'admin_stats'}],
+            [{'text': '📢 Рассылка', 'callback_data': 'admin_broadcast'}],
+            [{'text': '👥 Поиск пользователя', 'callback_data': 'admin_search'}],
+            [{'text': '🏠 Пользовательское меню', 'callback_data': 'back_to_main'}]
+        ]
+    }
+
 # Обработчики команд
 def handle_start_command(chat_id, user_id, username, first_name):
     """Обработчик команды /start"""
@@ -336,6 +347,89 @@ def handle_faq_info(chat_id, message_id=None):
     else:
         return send_message(chat_id, FAQ_TEXT, keyboard)
 
+def handle_admin_panel(chat_id, message_id=None):
+    """Обработчик админ-панели"""
+    admins_str = os.getenv('ADMINS', '')
+    admins = [int(admin_id.strip()) for admin_id in admins_str.split(',') if admin_id.strip().isdigit()]
+    
+    admin_text = f"""
+🛠 <b>Панель администратора</b>
+
+👑 Администраторов: {len(admins)}
+Выберите действие:
+    """
+    
+    keyboard = get_admin_menu_keyboard()
+    
+    if message_id:
+        return edit_message(chat_id, message_id, admin_text, keyboard)
+    else:
+        return send_message(chat_id, admin_text, keyboard)
+
+def handle_admin_stats(chat_id, message_id):
+    """Обработчик статистики"""
+    stats_text = """
+📊 <b>Статистика бота</b>
+
+👥 <b>Пользователи:</b>
+• Всего: информация в разработке
+• Активных: информация в разработке
+
+🛠 <b>Админ-функции:</b>
+• Рассылка: в разработке
+• Поиск пользователя: в разработке
+    """
+    
+    keyboard = {
+        'inline_keyboard': [
+            [{'text': '◀️ Назад в админку', 'callback_data': 'admin_back'}]
+        ]
+    }
+    
+    return edit_message(chat_id, message_id, stats_text, keyboard)
+
+def handle_admin_broadcast(chat_id, message_id):
+    """Обработчик рассылки"""
+    broadcast_text = """
+📢 <b>Рассылка сообщений</b>
+
+Функция рассылки находится в разработке.
+
+В будущем здесь можно будет:
+• Отправлять сообщения всем пользователям
+• Отправлять сообщения только пользователям (без админов)
+• Просматривать историю рассылок
+    """
+    
+    keyboard = {
+        'inline_keyboard': [
+            [{'text': '◀️ Назад в админку', 'callback_data': 'admin_back'}]
+        ]
+    }
+    
+    return edit_message(chat_id, message_id, broadcast_text, keyboard)
+
+def handle_admin_search(chat_id, message_id):
+    """Обработчик поиска пользователя"""
+    search_text = """
+👥 <b>Поиск пользователя</b>
+
+Функция поиска пользователя находится в разработке.
+
+В будущем здесь можно будет:
+• Искать пользователей по ID, имени или username
+• Просматривать статистику конкретного пользователя
+• Отправлять сообщения конкретным пользователям
+    """
+    
+    keyboard = {
+        'inline_keyboard': [
+            [{'text': '◀️ Назад в админку', 'callback_data': 'admin_back'}]
+        ]
+    }
+    
+    return edit_message(chat_id, message_id, search_text, keyboard)
+
 # Функции форматирования
 def format_district_info(district_info):
     return f"""
@@ -439,6 +533,11 @@ def webhook():
             username = message['from'].get('username', '')
             first_name = message['from'].get('first_name', '')
             
+            # Проверяем права администратора
+            admins_str = os.getenv('ADMINS', '')
+            admins = [int(admin_id.strip()) for admin_id in admins_str.split(',') if admin_id.strip().isdigit()]
+            is_admin = user_id in admins
+            
             if 'text' in message:
                 text = message['text']
                 
@@ -450,6 +549,11 @@ def webhook():
                     handle_documents_info(chat_id)
                 elif text.startswith('/faq'):
                     handle_faq_info(chat_id)
+                elif text.startswith('/admin') and is_admin:
+                    handle_admin_panel(chat_id)
+                elif text.startswith('/stats') and is_admin:
+                    # Временная реализация команды /stats
+                    send_message(chat_id, "📊 Статистика бота:\n\nФункция в разработке. Используйте админ-панель для просмотра статистики.")
                 else:
                     send_message(chat_id, "Используйте команду /start для начала работы")
         
@@ -461,27 +565,63 @@ def webhook():
             message_id = callback_query['message']['message_id']
             user_id = callback_query['from']['id']
             
+            # Проверяем права администратора для админ-функций
+            admins_str = os.getenv('ADMINS', '')
+            admins = [int(admin_id.strip()) for admin_id in admins_str.split(',') if admin_id.strip().isdigit()]
+            is_admin = user_id in admins
+            
             # Отвечаем на callback запрос
             answer_callback_query(callback_query['id'])
             
             # Обрабатываем различные callback данные
             if callback_data == 'back_to_main':
                 handle_start_command(chat_id, user_id, '', '')
+            
             elif callback_data == 'main_districts':
                 keyboard = get_districts_keyboard()
                 edit_message(chat_id, message_id, "🏃 <b>Выберите район:</b>\n\nПосле выбора района вы получите:\n• Адрес и расписание\n• Ссылку на чат родителей\n• Всю необходимую информацию", keyboard)
+            
             elif callback_data.startswith('district_'):
                 district_key = callback_data.replace('district_', '')
                 handle_districts_selection(chat_id, message_id, district_key)
+            
             elif callback_data.startswith('base_'):
                 base_key = callback_data.replace('base_', '')
                 handle_base_selection(chat_id, message_id, base_key)
+            
             elif callback_data == 'main_payment':
                 handle_payment_info(chat_id, message_id)
+            
             elif callback_data == 'main_documents':
                 handle_documents_info(chat_id, message_id)
+            
             elif callback_data == 'main_faq':
                 handle_faq_info(chat_id, message_id)
+            
+            # Обработка админ-панели
+            elif callback_data == 'admin_back':
+                if is_admin:
+                    handle_admin_panel(chat_id, message_id)
+                else:
+                    send_message(chat_id, "⛔ У вас нет прав доступа к админ-панели.")
+            
+            elif callback_data == 'admin_stats':
+                if is_admin:
+                    handle_admin_stats(chat_id, message_id)
+                else:
+                    send_message(chat_id, "⛔ У вас нет прав доступа к этой функции.")
+            
+            elif callback_data == 'admin_broadcast':
+                if is_admin:
+                    handle_admin_broadcast(chat_id, message_id)
+                else:
+                    send_message(chat_id, "⛔ У вас нет прав доступа к этой функции.")
+            
+            elif callback_data == 'admin_search':
+                if is_admin:
+                    handle_admin_search(chat_id, message_id)
+                else:
+                    send_message(chat_id, "⛔ У вас нет прав доступа к этой функции.")
         
         return 'OK'
     
