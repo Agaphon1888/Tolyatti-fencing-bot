@@ -28,7 +28,10 @@ def setup_bot():
         
         # Устанавливаем вебхук
         webhook_url = f"https://tolyatti-fencing-bot.onrender.com/webhook"
+        logger.info(f"🔧 Setting webhook to: {webhook_url}")
+        
         bot.remove_webhook()
+        time.sleep(1)
         bot.set_webhook(url=webhook_url)
         
         logger.info(f"✅ Bot setup completed. Webhook: {webhook_url}")
@@ -65,6 +68,33 @@ def health():
 def ping():
     return "PONG"
 
+@app.route('/debug')
+def debug():
+    """Страница диагностики"""
+    global bot
+    try:
+        webhook_info = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getWebhookInfo").json()
+        return {
+            "bot_initialized": bot is not None,
+            "bot_token_set": bool(BOT_TOKEN and BOT_TOKEN != 'YOUR_BOT_TOKEN_HERE'),
+            "webhook_info": webhook_info,
+            "status": "running"
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.route('/set_webhook')
+def set_webhook_manual():
+    """Ручная установка вебхука"""
+    global bot
+    if bot:
+        webhook_url = f"https://tolyatti-fencing-bot.onrender.com/webhook"
+        bot.remove_webhook()
+        time.sleep(1)
+        result = bot.set_webhook(url=webhook_url)
+        return f"Webhook set to: {webhook_url}, Result: {result}"
+    return "Bot not initialized"
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Обработчик вебхуков от Telegram"""
@@ -75,11 +105,15 @@ def webhook():
         
     try:
         json_data = request.get_json()
+        logger.info(f"📨 Received update: {json_data}")
+        
         update = types.Update.de_json(json_data)
         bot.process_new_updates([update])
+        
+        logger.info("✅ Update processed successfully")
         return "OK"
     except Exception as e:
-        logger.error(f"❌ Webhook error: {e}")
+        logger.error(f"❌ Webhook error: {e}", exc_info=True)
         return "Error", 500
 
 # Инициализация бота при импорте
