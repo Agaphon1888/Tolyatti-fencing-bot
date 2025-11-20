@@ -4,6 +4,7 @@ from flask import Flask, request
 import telebot
 from telebot import types
 import time
+import threading
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -81,21 +82,81 @@ def webhook():
         json_data = request.get_json()
         logger.info(f"📨 MINIMAL: Received update ID: {json_data.get('update_id')}")
         
+        # Используем альтернативный метод обработки
         update = types.Update.de_json(json_data)
         
         # Логируем тип обновления
         if update.message:
             logger.info(f"💬 Message from {update.message.from_user.id}: {update.message.text}")
+            
+            # Пробуем разные методы обработки
+            try:
+                # Метод 1: Прямой вызов process_new_messages
+                logger.info("🔄 Trying process_new_messages...")
+                bot.process_new_messages([update.message])
+            except Exception as e1:
+                logger.error(f"❌ process_new_messages failed: {e1}")
+                try:
+                    # Метод 2: Ручной вызов обработчиков
+                    logger.info("🔄 Trying manual handler execution...")
+                    for handler in bot.message_handlers:
+                        if handler['check'](update.message):
+                            logger.info(f"✅ Executing handler: {handler}")
+                            handler['function'](update.message)
+                            break
+                except Exception as e2:
+                    logger.error(f"❌ Manual handler execution failed: {e2}")
+                    
         elif update.callback_query:
             logger.info(f"🔘 Callback from {update.callback_query.from_user.id}: {update.callback_query.data}")
-        
-        # Обрабатываем обновление
-        bot.process_new_updates([update])
+            bot.process_new_callback_query([update.callback_query])
         
         logger.info("✅ MINIMAL: Update processed successfully")
         return "OK"
     except Exception as e:
         logger.error(f"❌ MINIMAL: Webhook error: {e}", exc_info=True)
+        return "Error", 500
+
+# Функция для отправки сообщения напрямую через API
+def send_message_directly(chat_id, text):
+    """Отправка сообщения напрямую через Telegram API"""
+    try:
+        import requests
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        payload = {
+            'chat_id': chat_id,
+            'text': text,
+            'parse_mode': 'HTML'
+        }
+        response = requests.post(url, json=payload)
+        logger.info(f"📤 Direct API response: {response.status_code}")
+        return response.json()
+    except Exception as e:
+        logger.error(f"❌ Direct API failed: {e}")
+
+# Альтернативный маршрут вебхука с прямой отправкой
+@app.route('/webhook2', methods=['POST'])
+def webhook2():
+    """Альтернативный обработчик вебхуков"""
+    try:
+        json_data = request.get_json()
+        logger.info(f"📨 WEBHOOK2: Received update")
+        
+        if 'message' in json_data:
+            message = json_data['message']
+            chat_id = message['chat']['id']
+            text = message.get('text', '')
+            
+            logger.info(f"💬 WEBHOOK2: Message from {chat_id}: {text}")
+            
+            if text == '/start':
+                response = send_message_directly(chat_id, 
+                    "🤺 Добро пожаловать! Это сообщение отправлено напрямую через API!")
+                logger.info(f"✅ WEBHOOK2: Direct message sent: {response}")
+        
+        return "OK"
+    except Exception as e:
+        logger.error(f"❌ WEBHOOK2 error: {e}")
         return "Error", 500
 
 # Установка вебхука при старте
@@ -104,16 +165,12 @@ if BOT_TOKEN and BOT_TOKEN != 'YOUR_BOT_TOKEN_HERE':
         webhook_url = f"https://tolyatti-fencing-bot.onrender.com/webhook"
         logger.info(f"🔧 Setting webhook to: {webhook_url}")
         
-        # Даем время на запуск сервера
         time.sleep(2)
-        
         bot.remove_webhook()
         time.sleep(1)
         result = bot.set_webhook(url=webhook_url)
         
         logger.info(f"✅ MINIMAL: Webhook set successfully: {result}")
-        
-        # Логируем зарегистрированные обработчики
         log_handlers()
         
     except Exception as e:
