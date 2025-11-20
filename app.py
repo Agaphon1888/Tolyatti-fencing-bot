@@ -68,33 +68,6 @@ def health():
 def ping():
     return "PONG"
 
-@app.route('/debug')
-def debug():
-    """Страница диагностики"""
-    global bot
-    try:
-        webhook_info = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getWebhookInfo").json()
-        return {
-            "bot_initialized": bot is not None,
-            "bot_token_set": bool(BOT_TOKEN and BOT_TOKEN != 'YOUR_BOT_TOKEN_HERE'),
-            "webhook_info": webhook_info,
-            "status": "running"
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-@app.route('/set_webhook')
-def set_webhook_manual():
-    """Ручная установка вебхука"""
-    global bot
-    if bot:
-        webhook_url = f"https://tolyatti-fencing-bot.onrender.com/webhook"
-        bot.remove_webhook()
-        time.sleep(1)
-        result = bot.set_webhook(url=webhook_url)
-        return f"Webhook set to: {webhook_url}, Result: {result}"
-    return "Bot not initialized"
-
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Обработчик вебхуков от Telegram"""
