@@ -6,8 +6,13 @@ from database import save_user_session, log_user_action, init_db, get_statistics
 
 logger = logging.getLogger(__name__)
 
+# Глобальная переменная для хранения экземпляра бота
+current_bot = None
+
 def setup_bot_handlers(bot):
     """Настройка всех обработчиков для pyTelegramBotAPI"""
+    global current_bot
+    current_bot = bot
     
     # Инициализация БД
     init_db()
@@ -420,7 +425,7 @@ def format_base_info(district_info, base_info):
 
 def format_payment_info():
     return f"""
-💳 <b>Реквизиты для оплате</b>
+💳 <b>Реквизиты для оплаты</b>
 
 🏛 <b>Полное наименование:</b> 
 {ORG_INFO['full_name']}
