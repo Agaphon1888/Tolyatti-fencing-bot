@@ -99,6 +99,8 @@ def run_bot_with_retry():
                     break
             else:
                 logger.error("❌ Unexpected error, stopping retries.")
+                import traceback
+                logger.error(traceback.format_exc())
                 break
 
 def close_previous_connections():
@@ -119,15 +121,18 @@ def close_previous_connections():
 
 def run_bot():
     """Запуск бота в отдельном потоке"""
+    logger.info("🎯 Bot thread started")
     try:
         run_bot_with_retry()
     except Exception as e:
         logger.error(f"❌ Critical bot error: {e}")
         import traceback
         logger.error(traceback.format_exc())
+    logger.info("🎯 Bot thread finished")
 
 def self_ping():
     """Функция для самопинга приложения"""
+    logger.info("🎯 Ping thread started")
     app_url = "https://tolyatti-fencing-bot.onrender.com"
     
     while True:
@@ -174,22 +179,36 @@ atexit.register(cleanup)
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
-# Основной запуск
-if __name__ == '__main__':
-    # Запускаем бота только если токен установлен
+# ЗАПУСКАЕМ БОТА ПРИ ИМПОРТЕ МОДУЛЯ (для Gunicorn)
+def start_background_threads():
+    """Запуск фоновых потоков при инициализации приложения"""
+    global bot_thread, ping_thread
+    
     if BOT_TOKEN and BOT_TOKEN != 'YOUR_BOT_TOKEN_HERE':
-        logger.info("🚀 Starting bot thread...")
-        bot_thread = threading.Thread(target=run_bot, daemon=True)
-        bot_thread.start()
+        logger.info("✅ BOT_TOKEN is set, starting bot and ping threads...")
         
-        # Запускаем самопинг в отдельном потоке
-        logger.info("🔄 Starting self-ping thread...")
-        ping_thread = threading.Thread(target=self_ping, daemon=True)
-        ping_thread.start()
+        # Запускаем бота только если он еще не запущен
+        if bot_thread is None or not bot_thread.is_alive():
+            logger.info("🚀 Starting bot thread...")
+            bot_thread = threading.Thread(target=run_bot, daemon=True)
+            bot_thread.start()
+        else:
+            logger.info("⚠️ Bot thread is already running")
         
-        # Запускаем Flask приложение
-        app.run(host='0.0.0.0', port=PORT, debug=False)
+        # Запускаем пинг только если он еще не запущен
+        if ping_thread is None or not ping_thread.is_alive():
+            logger.info("🔄 Starting self-ping thread...")
+            ping_thread = threading.Thread(target=self_ping, daemon=True)
+            ping_thread.start()
+        else:
+            logger.info("⚠️ Ping thread is already running")
     else:
         logger.error("❌ BOT_TOKEN not configured!")
-        # Все равно запускаем Flask для мониторинга
-        app.run(host='0.0.0.0', port=PORT, debug=False)
+
+# Запускаем фоновые потоки при старте приложения
+start_background_threads()
+
+if __name__ == '__main__':
+    # Дополнительный запуск для локальной разработки
+    start_background_threads()
+    app.run(host='0.0.0.0', port=PORT, debug=False)
