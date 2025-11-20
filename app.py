@@ -1,10 +1,9 @@
 import os
 import logging
-from flask import Flask, request
-import telebot
-from telebot import types
-import time
+from flask import Flask, request, jsonify
+import requests
 import threading
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -12,43 +11,398 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-logger.info(f"🔧 BOT_TOKEN: {'***' + BOT_TOKEN[-4:] if BOT_TOKEN else 'NOT SET'}")
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-# Создаем бота
-bot = telebot.TeleBot(BOT_TOKEN)
+# Конфигурация
+ORG_INFO = {
+    'full_name': 'Автономная некоммерческая организация "Тольяттинская федерация фехтования"',
+    'short_name': 'АНО "Тольяттинская федерация фехтования"',
+    'inn': '6320267029',
+    'kpp': '632001001',
+    'ogrn': '1146300002793',
+    'account': '40703810212300001063',
+    'bank': 'ОАО АКБ "Авангард"',
+    'bik': '044525201',
+    'correspondent_account': '3010181000000000201'
+}
 
-# Диагностика - проверим все зарегистрированные обработчики
-def log_handlers():
-    logger.info("🔍 Registered handlers:")
-    for handler in bot.message_handlers:
-        logger.info(f"   - {handler}")
+DISTRICTS_INFO = {
+    'central': {
+        'name': 'Центральный район',
+        'chat_link': 'https://t.me/+ls3LxVHjH680MDdi',
+        'schedule': '''Пн - ОФП и фехтование 18:00
+Ср - ОФП и фехтование 18:00
+Сб - Фехтование 18:00''',
+        'address': 'Ленина 58, школа 91, корпус Б, малый зал',
+        'price': '2000 рублей в месяц'
+    },
+    'avtozavodsky': {
+        'name': 'Автозаводский район',
+        'chat_link': 'https://t.me/+IQpyrN7sq3c2ZjRi',
+        'bases': {
+            'volgar': {
+                'name': 'Волгарь',
+                'schedule': '''ПН: 16:00 средние и новички ОФП, 18:30 малыши и новички ОФП
+ВТ: 15:00 средние и новички фехтование, 16:30 новички (новый зал)
+СР: 17:15 новички все (новый зал)
+ЧТ: 15:00 средние и новички фехтование, 16:30 новички (новый зал)
+ПТ: 15:30 средние и новички фехтование
+СБ: 16:30-18:00 новички все (новый зал)''',
+                'address': 'ДС Волгарь, вход со стороны Веги, зал Фехтования'
+            },
+            'school69': {
+                'name': 'Школа 69',
+                'schedule': '''ПН: 15:30-16:30
+ВТ: 16:00-18:00
+СР: 15:30-16:30
+ЧТ: 16:00-18:00
+ПТ: 16:00-18:00
+СБ: Боевая в волгаре (уточнить время)
+ВСК: 12:00-14:00''',
+                'address': '13 квартал, 40 лет Победы, 120, Музыкальный зал'
+            },
+            'school66': {
+                'name': 'Школа 66',
+                'schedule': 'Уточняется в чате района',
+                'address': 'Уточняется в чате района'
+            }
+        },
+        'price': '2000 рублей в месяц'
+    },
+    'komso': {
+        'name': 'Комсомольский район',
+        'chat_link': 'https://t.me/+jO5wcwUbxq0wMjgy',
+        'schedule': '''Пн: 15:00 (ср/ст и новички), 17:00 (мл и новички)
+Вт: 9:00 (2 смена новички), 15:00 (мл), 16:00 (ср/ст)
+Ср: 16:00-18:00 ОФП
+Чт: 9:00 (2 смена), 15:00 (ср/мл), 16:00 (ст), 17:00 (мл и новички)
+Пт: 15:00 (ср/ст), 17:00 (мл)
+Сб: 14:00 ОФП (мл и новички)''',
+        'address': 'Мурысева 52а, вход со двора',
+        'price': '2000 рублей в месяц'
+    },
+    'zhig': {
+        'name': 'Жигулёвск',
+        'chat_link': 'https://t.me/+b4YyZF5QXts1NTVi',
+        'schedule': '''Ср: 16:30-18:00 ОФП
+Чт: 16:00-17:30 фехтование
+Сб: 15:30-17:00 фехтование и ОФП
+Вск: 13:00-14:00 ОФП и фехтование''',
+        'address': 'ДМО, Гидростроителей 10а',
+        'price': '2000 рублей в месяц'
+    }
+}
 
-# Простой обработчик команды /start
-@bot.message_handler(commands=['start'])
-def start_command(message):
-    user = message.from_user
-    logger.info(f"👤 MINIMAL: User {user.id} started the bot - HANDLER EXECUTED")
-    
-    welcome_text = """
-🤺 Добро пожаловать в <b>Тольяттинскую федерацию фехтования</b>!
+DOCUMENTS_LIST = '''
+📋 <b>Необходимые документы:</b>
 
-Это тестовое сообщение. Бот работает!
+• 4 фотографии 3x4
+• Копия свидетельства о рождении или паспорта с пропиской
+• Копия паспорта одного из родителей с пропиской
+• Копия СНИЛС ребенка
+• Копия ИНН ребенка
+• Справка из школы
+• Справка от педиатра, что здоров и может заниматься ФЕХТОВАНИЕМ
+• Доверенности, согласия и заявления (бланки выдаются на месте)
 
-Команда /start обработана успешно!
-    """
+⚠️ <b>Важно:</b> Документы можно принести после пробных тренировок!
+'''
+
+FAQ_TEXT = '''
+❓ <b>Частые вопросы:</b>
+
+<b>1. С чего начать?</b>
+Выберите район, придите на пробную тренировку. Все необходимое для первой тренировки: сменная обувь, спортивная форма, вода.
+
+<b>2. Когда нужно платить?</b>
+Оплата производится после пробных тренировок, когда вы приняли решение заниматься.
+
+<b>3. Нужно ли сразу приносить документы?</b>
+Нет, документы можно принести в течение первых недель занятий.
+
+<b>4. Сколько раз в неделю проходят тренировки?</b>
+Новички обычно занимаются 3 раза в неделю, затем количество тренировок может увеличиваться.
+
+<b>5. Можно ли поменять район/базу?</b>
+Да, в течение пробного периода можно выбрать наиболее удобный вариант.
+'''
+
+# Функции для работы с Telegram API
+def send_message(chat_id, text, reply_markup=None, parse_mode='HTML'):
+    """Отправка сообщения через Telegram API"""
+    url = f"{TELEGRAM_API_URL}/sendMessage"
+    payload = {
+        'chat_id': chat_id,
+        'text': text,
+        'parse_mode': parse_mode
+    }
+    if reply_markup:
+        payload['reply_markup'] = reply_markup
     
     try:
-        sent_message = bot.send_message(message.chat.id, welcome_text, parse_mode='HTML')
-        logger.info(f"✅ MINIMAL: Start message sent to user {user.id}, message_id: {sent_message.message_id}")
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code == 200:
+            logger.info(f"✅ Message sent to {chat_id}")
+            return True
+        else:
+            logger.error(f"❌ Failed to send message: {response.status_code} - {response.text}")
+            return False
     except Exception as e:
-        logger.error(f"❌ MINIMAL: Failed to send start message: {e}")
+        logger.error(f"❌ Error sending message: {e}")
+        return False
 
-# Обработчик для всех сообщений для диагностики
-@bot.message_handler(func=lambda message: True)
-def echo_all(message):
-    logger.info(f"🔍 ECHO: Received message from {message.from_user.id}: {message.text}")
-    bot.reply_to(message, f"Эхо: {message.text}")
+def edit_message(chat_id, message_id, text, reply_markup=None, parse_mode='HTML'):
+    """Редактирование сообщения через Telegram API"""
+    url = f"{TELEGRAM_API_URL}/editMessageText"
+    payload = {
+        'chat_id': chat_id,
+        'message_id': message_id,
+        'text': text,
+        'parse_mode': parse_mode
+    }
+    if reply_markup:
+        payload['reply_markup'] = reply_markup
+    
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        return response.status_code == 200
+    except Exception as e:
+        logger.error(f"❌ Error editing message: {e}")
+        return False
 
+def answer_callback_query(callback_query_id, text=None):
+    """Ответ на callback запрос"""
+    url = f"{TELEGRAM_API_URL}/answerCallbackQuery"
+    payload = {
+        'callback_query_id': callback_query_id
+    }
+    if text:
+        payload['text'] = text
+    
+    try:
+        response = requests.post(url, json=payload, timeout=5)
+        return response.status_code == 200
+    except Exception as e:
+        logger.error(f"❌ Error answering callback: {e}")
+        return False
+
+# Клавиатуры
+def get_main_menu_keyboard(is_admin=False):
+    """Клавиатура главного меню"""
+    keyboard = {
+        'inline_keyboard': [
+            [{'text': '🏃 Выбрать район', 'callback_data': 'main_districts'}],
+            [{'text': '💳 Реквизиты оплаты', 'callback_data': 'main_payment'}],
+            [{'text': '📋 Список документов', 'callback_data': 'main_documents'}],
+            [{'text': '❓ Частые вопросы', 'callback_data': 'main_faq'}]
+        ]
+    }
+    if is_admin:
+        keyboard['inline_keyboard'].append([{'text': '🛠 Админ-панель', 'callback_data': 'admin_back'}])
+    return keyboard
+
+def get_districts_keyboard():
+    """Клавиатура выбора района"""
+    return {
+        'inline_keyboard': [
+            [{'text': 'Центральный район', 'callback_data': 'district_central'}],
+            [{'text': 'Автозаводский район', 'callback_data': 'district_avtozavodsky'}],
+            [{'text': 'Комсомольский район', 'callback_data': 'district_komso'}],
+            [{'text': 'Жигулёвск', 'callback_data': 'district_zhig'}],
+            [{'text': '◀️ Назад', 'callback_data': 'back_to_main'}]
+        ]
+    }
+
+def get_back_to_main_keyboard():
+    """Клавиатура с кнопкой назад"""
+    return {
+        'inline_keyboard': [
+            [{'text': '🏠 В главное меню', 'callback_data': 'back_to_main'}]
+        ]
+    }
+
+# Обработчики команд
+def handle_start_command(chat_id, user_id, username, first_name):
+    """Обработчик команды /start"""
+    logger.info(f"👤 User {user_id} started the bot")
+    
+    welcome_text = f"""
+🤺 Добро пожаловать в <b>Тольяттинскую федерацию фехтования</b>, {first_name}!
+
+Здесь вы можете:
+• Выбрать удобный район для тренировок
+• Узнать реквизиты для оплаты
+• Получить список необходимых документов
+• Найти ответы на частые вопросы
+
+Выберите нужный раздел:
+    """
+    
+    # Проверяем, является ли пользователь администратором
+    admins_str = os.getenv('ADMINS', '')
+    admins = [int(admin_id.strip()) for admin_id in admins_str.split(',') if admin_id.strip().isdigit()]
+    is_admin = user_id in admins
+    
+    keyboard = get_main_menu_keyboard(is_admin)
+    return send_message(chat_id, welcome_text, keyboard)
+
+def handle_districts_selection(chat_id, message_id, district_key):
+    """Обработчик выбора района"""
+    district_info = DISTRICTS_INFO.get(district_key)
+    if not district_info:
+        return False
+    
+    if district_key == 'avtozavodsky':
+        return handle_avtozavodsky_district(chat_id, message_id, district_info)
+    
+    message = format_district_info(district_info)
+    keyboard = {
+        'inline_keyboard': [
+            [{'text': '💳 Реквизиты оплаты', 'callback_data': 'main_payment'}],
+            [{'text': '📋 Документы', 'callback_data': 'main_documents'}],
+            [{'text': '◀️ Выбрать другой район', 'callback_data': 'main_districts'}],
+            [{'text': '🏠 В главное меню', 'callback_data': 'back_to_main'}]
+        ]
+    }
+    
+    if message_id:
+        return edit_message(chat_id, message_id, message, keyboard)
+    else:
+        return send_message(chat_id, message, keyboard)
+
+def handle_avtozavodsky_district(chat_id, message_id, district_info):
+    """Обработчик Автозаводского района (выбор базы)"""
+    keyboard = {
+        'inline_keyboard': []
+    }
+    
+    for base_key, base_info in district_info['bases'].items():
+        keyboard['inline_keyboard'].append([{'text': base_info['name'], 'callback_data': f'base_{base_key}'}])
+    
+    keyboard['inline_keyboard'].append([{'text': '◀️ Назад к районам', 'callback_data': 'main_districts'}])
+    
+    message = "🏢 <b>Автозаводский район</b>\n\nВыберите удобную вам базу:"
+    
+    if message_id:
+        return edit_message(chat_id, message_id, message, keyboard)
+    else:
+        return send_message(chat_id, message, keyboard)
+
+def handle_base_selection(chat_id, message_id, base_key):
+    """Обработчик выбора базы"""
+    district_info = DISTRICTS_INFO['avtozavodsky']
+    base_info = district_info['bases'].get(base_key)
+    
+    if not base_info:
+        return False
+    
+    message = format_base_info(district_info, base_info)
+    keyboard = {
+        'inline_keyboard': [
+            [{'text': '💳 Реквизиты оплаты', 'callback_data': 'main_payment'}],
+            [{'text': '📋 Документы', 'callback_data': 'main_documents'}],
+            [{'text': '◀️ Выбрать другую базу', 'callback_data': 'district_avtozavodsky'}],
+            [{'text': '🏠 В главное меню', 'callback_data': 'back_to_main'}]
+        ]
+    }
+    
+    return edit_message(chat_id, message_id, message, keyboard)
+
+def handle_payment_info(chat_id, message_id=None):
+    """Обработчик информации об оплате"""
+    message = format_payment_info()
+    keyboard = get_back_to_main_keyboard()
+    
+    if message_id:
+        return edit_message(chat_id, message_id, message, keyboard)
+    else:
+        return send_message(chat_id, message, keyboard)
+
+def handle_documents_info(chat_id, message_id=None):
+    """Обработчик информации о документах"""
+    keyboard = get_back_to_main_keyboard()
+    
+    if message_id:
+        return edit_message(chat_id, message_id, DOCUMENTS_LIST, keyboard)
+    else:
+        return send_message(chat_id, DOCUMENTS_LIST, keyboard)
+
+def handle_faq_info(chat_id, message_id=None):
+    """Обработчик FAQ"""
+    keyboard = get_back_to_main_keyboard()
+    
+    if message_id:
+        return edit_message(chat_id, message_id, FAQ_TEXT, keyboard)
+    else:
+        return send_message(chat_id, FAQ_TEXT, keyboard)
+
+# Функции форматирования
+def format_district_info(district_info):
+    return f"""
+<b>{district_info['name']}</b>
+
+📍 <b>Адрес:</b> {district_info['address']}
+
+📅 <b>Расписание:</b>
+{district_info['schedule']}
+
+💬 <b>Чат для родителей:</b> {district_info['chat_link']}
+
+💰 <b>Стоимость:</b> {district_info['price']}
+
+👕 <b>С собой на тренировку:</b> сменные кроссовки для зала, белые носки, спортивная форма, бутылочка с водой
+
+⚠️ <b>Важно:</b> пока не нужно платить и приносить документы! Все в процессе!
+    """
+
+def format_base_info(district_info, base_info):
+    return f"""
+<b>{district_info['name']} - {base_info['name']}</b>
+
+📍 <b>Адрес:</b> {base_info['address']}
+
+📅 <b>Расписание:</b>
+{base_info['schedule']}
+
+💬 <b>Чат для родителей:</b> {district_info['chat_link']}
+
+💰 <b>Стоимость:</b> {district_info['price']}
+
+👕 <b>С собой на тренировку:</b> сменные кроссовки для зала, белые носки, спортивная форма, бутылочка с водой
+
+⚠️ <b>Важно:</b> пока не нужно платить и приносить документов! Все в процессе!
+    """
+
+def format_payment_info():
+    return f"""
+💳 <b>Реквизиты для оплаты</b>
+
+🏛 <b>Полное наименование:</b> 
+{ORG_INFO['full_name']}
+
+📋 <b>Сокращенное:</b> 
+{ORG_INFO['short_name']}
+
+📊 <b>Реквизиты:</b>
+ИНН: {ORG_INFO['inn']}
+КПП: {ORG_INFO['kpp']}
+ОГРН: {ORG_INFO['ogrn']}
+Расчетный счет: {ORG_INFO['account']}
+Банк: {ORG_INFO['bank']}
+БИК: {ORG_INFO['bik']}
+Корр. счет: {ORG_INFO['correspondent_account']}
+
+💸 <b>Сумма:</b> 2000 рублей в месяц
+📝 <b>Назначение платежа:</b> "Добровольное пожертвование от [ФИО ребенка]"
+
+⚠️ <b>Важно:</b>
+• Оплата производится после пробных тренировок
+• В назначении платежа укажите ФИО ребенка
+• Сохраните чек об оплате
+• Квитанцию можно показать тренеру или отправить в чат группы
+    """
+
+# Flask маршруты
 @app.route('/')
 def home():
     return "🤺 Fencing Bot is running!"
@@ -61,15 +415,10 @@ def health():
 def debug():
     """Страница диагностики"""
     try:
-        webhook_info = bot.get_webhook_info()
+        webhook_info = requests.get(f"{TELEGRAM_API_URL}/getWebhookInfo").json()
         return {
             "bot_token_set": bool(BOT_TOKEN),
-            "webhook_info": {
-                "url": webhook_info.url,
-                "has_custom_certificate": webhook_info.has_custom_certificate,
-                "pending_update_count": webhook_info.pending_update_count
-            },
-            "handlers_count": len(bot.message_handlers),
+            "webhook_info": webhook_info,
             "status": "running"
         }
     except Exception as e:
@@ -77,87 +426,83 @@ def debug():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Обработчик вебхуков от Telegram"""
+    """Основной обработчик вебхуков от Telegram"""
     try:
-        json_data = request.get_json()
-        logger.info(f"📨 MINIMAL: Received update ID: {json_data.get('update_id')}")
+        data = request.get_json()
+        logger.info(f"📨 Received update: {data}")
         
-        # Используем альтернативный метод обработки
-        update = types.Update.de_json(json_data)
-        
-        # Логируем тип обновления
-        if update.message:
-            logger.info(f"💬 Message from {update.message.from_user.id}: {update.message.text}")
-            
-            # Пробуем разные методы обработки
-            try:
-                # Метод 1: Прямой вызов process_new_messages
-                logger.info("🔄 Trying process_new_messages...")
-                bot.process_new_messages([update.message])
-            except Exception as e1:
-                logger.error(f"❌ process_new_messages failed: {e1}")
-                try:
-                    # Метод 2: Ручной вызов обработчиков
-                    logger.info("🔄 Trying manual handler execution...")
-                    for handler in bot.message_handlers:
-                        if handler['check'](update.message):
-                            logger.info(f"✅ Executing handler: {handler}")
-                            handler['function'](update.message)
-                            break
-                except Exception as e2:
-                    logger.error(f"❌ Manual handler execution failed: {e2}")
-                    
-        elif update.callback_query:
-            logger.info(f"🔘 Callback from {update.callback_query.from_user.id}: {update.callback_query.data}")
-            bot.process_new_callback_query([update.callback_query])
-        
-        logger.info("✅ MINIMAL: Update processed successfully")
-        return "OK"
-    except Exception as e:
-        logger.error(f"❌ MINIMAL: Webhook error: {e}", exc_info=True)
-        return "Error", 500
-
-# Функция для отправки сообщения напрямую через API
-def send_message_directly(chat_id, text):
-    """Отправка сообщения напрямую через Telegram API"""
-    try:
-        import requests
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        payload = {
-            'chat_id': chat_id,
-            'text': text,
-            'parse_mode': 'HTML'
-        }
-        response = requests.post(url, json=payload)
-        logger.info(f"📤 Direct API response: {response.status_code}")
-        return response.json()
-    except Exception as e:
-        logger.error(f"❌ Direct API failed: {e}")
-
-# Альтернативный маршрут вебхука с прямой отправкой
-@app.route('/webhook2', methods=['POST'])
-def webhook2():
-    """Альтернативный обработчик вебхуков"""
-    try:
-        json_data = request.get_json()
-        logger.info(f"📨 WEBHOOK2: Received update")
-        
-        if 'message' in json_data:
-            message = json_data['message']
+        # Обрабатываем сообщения
+        if 'message' in data:
+            message = data['message']
             chat_id = message['chat']['id']
-            text = message.get('text', '')
+            user_id = message['from']['id']
+            username = message['from'].get('username', '')
+            first_name = message['from'].get('first_name', '')
             
-            logger.info(f"💬 WEBHOOK2: Message from {chat_id}: {text}")
-            
-            if text == '/start':
-                response = send_message_directly(chat_id, 
-                    "🤺 Добро пожаловать! Это сообщение отправлено напрямую через API!")
-                logger.info(f"✅ WEBHOOK2: Direct message sent: {response}")
+            if 'text' in message:
+                text = message['text']
+                
+                if text.startswith('/start'):
+                    handle_start_command(chat_id, user_id, username, first_name)
+                elif text.startswith('/payment'):
+                    handle_payment_info(chat_id)
+                elif text.startswith('/documents'):
+                    handle_documents_info(chat_id)
+                elif text.startswith('/faq'):
+                    handle_faq_info(chat_id)
+                else:
+                    send_message(chat_id, "Используйте команду /start для начала работы")
         
-        return "OK"
+        # Обрабатываем callback запросы
+        elif 'callback_query' in data:
+            callback_query = data['callback_query']
+            callback_data = callback_query['data']
+            chat_id = callback_query['message']['chat']['id']
+            message_id = callback_query['message']['message_id']
+            user_id = callback_query['from']['id']
+            
+            # Отвечаем на callback запрос
+            answer_callback_query(callback_query['id'])
+            
+            # Обрабатываем различные callback данные
+            if callback_data == 'back_to_main':
+                handle_start_command(chat_id, user_id, '', '')
+            elif callback_data == 'main_districts':
+                keyboard = get_districts_keyboard()
+                edit_message(chat_id, message_id, "🏃 <b>Выберите район:</b>\n\nПосле выбора района вы получите:\n• Адрес и расписание\n• Ссылку на чат родителей\n• Всю необходимую информацию", keyboard)
+            elif callback_data.startswith('district_'):
+                district_key = callback_data.replace('district_', '')
+                handle_districts_selection(chat_id, message_id, district_key)
+            elif callback_data.startswith('base_'):
+                base_key = callback_data.replace('base_', '')
+                handle_base_selection(chat_id, message_id, base_key)
+            elif callback_data == 'main_payment':
+                handle_payment_info(chat_id, message_id)
+            elif callback_data == 'main_documents':
+                handle_documents_info(chat_id, message_id)
+            elif callback_data == 'main_faq':
+                handle_faq_info(chat_id, message_id)
+        
+        return 'OK'
+    
     except Exception as e:
-        logger.error(f"❌ WEBHOOK2 error: {e}")
-        return "Error", 500
+        logger.error(f"❌ Webhook error: {e}", exc_info=True)
+        return 'Error', 500
+
+def self_ping():
+    """Самопинг для поддержания активности"""
+    def ping_loop():
+        while True:
+            try:
+                response = requests.get("https://tolyatti-fencing-bot.onrender.com/health", timeout=10)
+                logger.info(f"✅ Self-ping successful: {response.status_code}")
+            except Exception as e:
+                logger.error(f"❌ Self-ping failed: {e}")
+            time.sleep(300)  # 5 минут
+    
+    thread = threading.Thread(target=ping_loop, daemon=True)
+    thread.start()
+    logger.info("🔄 Self-ping thread started")
 
 # Установка вебхука при старте
 if BOT_TOKEN and BOT_TOKEN != 'YOUR_BOT_TOKEN_HERE':
@@ -165,18 +510,28 @@ if BOT_TOKEN and BOT_TOKEN != 'YOUR_BOT_TOKEN_HERE':
         webhook_url = f"https://tolyatti-fencing-bot.onrender.com/webhook"
         logger.info(f"🔧 Setting webhook to: {webhook_url}")
         
+        # Даем время на запуск сервера
         time.sleep(2)
-        bot.remove_webhook()
-        time.sleep(1)
-        result = bot.set_webhook(url=webhook_url)
         
-        logger.info(f"✅ MINIMAL: Webhook set successfully: {result}")
-        log_handlers()
+        # Устанавливаем вебхук
+        response = requests.post(
+            f"{TELEGRAM_API_URL}/setWebhook",
+            json={'url': webhook_url},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            logger.info(f"✅ Webhook set successfully: {response.json()}")
+        else:
+            logger.error(f"❌ Failed to set webhook: {response.status_code} - {response.text}")
+        
+        # Запускаем самопинг
+        self_ping()
         
     except Exception as e:
-        logger.error(f"❌ MINIMAL: Failed to set webhook: {e}")
+        logger.error(f"❌ Failed to set webhook: {e}")
 else:
-    logger.error("❌ MINIMAL: BOT_TOKEN not configured!")
+    logger.error("❌ BOT_TOKEN not configured!")
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
