@@ -5,6 +5,7 @@ import time
 from flask import Flask, request
 import requests
 import telebot
+from telebot import types
 from config import BOT_TOKEN, PORT
 from bot_handlers import setup_bot_handlers
 
@@ -42,8 +43,8 @@ def self_ping():
     def ping_loop():
         while True:
             try:
-                requests.get("https://tolyatti-fencing-bot.onrender.com/health", timeout=10)
-                logger.info("✅ Self-ping successful")
+                response = requests.get("https://tolyatti-fencing-bot.onrender.com/health", timeout=10)
+                logger.info(f"✅ Self-ping successful: {response.status_code}")
             except Exception as e:
                 logger.error(f"❌ Self-ping failed: {e}")
             time.sleep(300)  # 5 минут
@@ -67,28 +68,30 @@ def ping():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Обработчик вебхуков от Telegram"""
+    global bot
     if bot is None:
+        logger.error("❌ Bot is None in webhook")
         return "Bot not initialized", 500
         
     try:
         json_data = request.get_json()
-        update = telebot.types.Update.de_json(json_data)
+        update = types.Update.de_json(json_data)
         bot.process_new_updates([update])
         return "OK"
     except Exception as e:
-        logger.error(f"Webhook error: {e}")
+        logger.error(f"❌ Webhook error: {e}")
         return "Error", 500
 
-# Инициализация при старте
-if __name__ == '__main__':
-    if BOT_TOKEN and BOT_TOKEN != 'YOUR_BOT_TOKEN_HERE':
-        logger.info("🚀 Initializing bot...")
-        if setup_bot():
-            logger.info("✅ Bot initialized successfully")
-            self_ping()
-        else:
-            logger.error("❌ Bot initialization failed")
+# Инициализация бота при импорте
+if BOT_TOKEN and BOT_TOKEN != 'YOUR_BOT_TOKEN_HERE':
+    logger.info("🚀 Initializing bot...")
+    if setup_bot():
+        logger.info("✅ Bot initialized successfully")
+        self_ping()
     else:
-        logger.error("❌ BOT_TOKEN not configured!")
-    
+        logger.error("❌ Bot initialization failed")
+else:
+    logger.error("❌ BOT_TOKEN not configured!")
+
+if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT, debug=False)
